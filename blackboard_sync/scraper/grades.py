@@ -1,3 +1,9 @@
+"""Verified against a real Southampton grades page: each row is
+<tr data-grade-id="..."> with per-column cells identified by
+aria-describedby pointing at a stable header id
+(course-student-grades-header-<itemName|dueDate|status|grade|results>).
+"""
+
 from __future__ import annotations
 
 import logging
@@ -14,6 +20,13 @@ from .courses import Course
 logger = logging.getLogger(__name__)
 
 
+def _cell_text(el, selector: Optional[str]) -> Optional[str]:
+    if not selector:
+        return None
+    cell = el.query_selector(selector)
+    return cell.inner_text().strip() if cell else None
+
+
 def sync_grades(page: Page, course: Course, course_dir: Path, config: Config, debug_dir: Optional[Path]) -> int:
     sel = config.selectors
     url = config.base_url + sel["grades_url_template"].format(course_id=course.course_id)
@@ -22,14 +35,13 @@ def sync_grades(page: Page, course: Course, course_dir: Path, config: Config, de
 
     rows = []
     for el in page.query_selector_all(sel["grade_row"]):
-        name_el = el.query_selector(sel["grade_name"])
-        score_el = el.query_selector(sel["grade_score"])
-        feedback_el = el.query_selector(sel["grade_feedback"])
         rows.append(
             {
-                "name": name_el.inner_text().strip() if name_el else None,
-                "score": score_el.inner_text().strip() if score_el else None,
-                "feedback": feedback_el.inner_text().strip() if feedback_el else None,
+                "name": _cell_text(el, sel.get("grade_name")),
+                "due_date": _cell_text(el, sel.get("grade_due")),
+                "status": _cell_text(el, sel.get("grade_status")),
+                "grade": _cell_text(el, sel.get("grade_score")),
+                "results": _cell_text(el, sel.get("grade_results")),
             }
         )
 

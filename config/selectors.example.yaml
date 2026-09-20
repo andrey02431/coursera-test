@@ -1,16 +1,18 @@
 # CSS/role selectors used to find things in Blackboard's UI.
 #
-# IMPORTANT: these are best-effort starting points based on Blackboard
-# Ultra's default (unbranded) theme. Every institution customises Blackboard
-# to some degree, and this file was written without access to Southampton's
-# live portal. Expect to need to tweak a few of these.
+# Verified against real debug dumps from a University of Southampton account
+# (course list, content outline, announcements, grades). Discussions is
+# still a best guess - see the note below.
 #
 # Workflow for fixing a selector that doesn't match:
-#   1. Run: python -m blackboard_sync discover --debug-dump
+#   1. Run: python -m blackboard_sync discover --debug-dump (or sync --debug-dump)
 #   2. Open debug/<page-name>.html in a browser, or the .png screenshot.
 #   3. Right-click the element you need in a real browser's devtools on the
-#      live site, "Inspect", find a stable attribute (data-testid, role,
-#      aria-label are more stable than generated class names).
+#      live site, "Inspect", find a stable attribute - Blackboard's own
+#      data-testid / data-analytics-id / aria-describedby / id-prefix
+#      conventions have been far more reliable than its auto-generated
+#      "makeStyles..." CSS classes, which are JSS build hashes that can
+#      change between deployments. Prefer those over class names.
 #   4. Update the matching key below. No Python code changes needed.
 #
 # Copy this file to selectors.yaml before editing (selectors.yaml is
@@ -18,12 +20,12 @@
 # no harm in them - nothing secret lives here).
 
 # --- Course list (landing page after login / "My Courses") ---
-# Confirmed against a real Southampton debug dump: /ultra/course renders
-# Blackboard's older Angular "Base Navigation" course list (not the Ultra
-# React app), and each course tile is a <a class="course-title" ...
-# id="course-link-_240080_1"> with href="javascript:void(0);" - the real
-# course ID (e.g. "_240080_1") lives in the *id* attribute, extracted via
-# course_id_regex below, not in an href.
+# /ultra/course renders Blackboard's older Angular "Base Navigation" course
+# list (not the Ultra React app). Each course tile is
+# <a class="course-title" ... id="course-link-_240080_1"
+#    href="javascript:void(0);">, so the real course ID (e.g. "_240080_1")
+# has to be pulled out of the *id* attribute via course_id_regex - there's
+# no usable href.
 course_list_url_path: "/ultra/course"
 course_tile: "a.course-title"
 course_id_attr: "id"                  # attribute to pull the course ID out of
@@ -31,43 +33,70 @@ course_id_regex: "^course-link-(.+)$" # regex applied to course_id_attr's value
 course_name: "h4.js-course-title-element, .js-course-title-element"
 
 # --- Course content outline (Ultra course view) ---
-# We navigate straight to this URL using the ID extracted from the course
-# list, without clicking through. This works for courses using Ultra course
-# view. Older/closed courses still on Original course view will likely
-# redirect elsewhere and won't match content_item below - if `sync` logs
-# "no content items found" for a specific course, that's probably why; the
-# original_content_* selectors below are a placeholder for adding Original
-# view support later.
+# We navigate straight to this URL using the ID from the course list. Works
+# for courses on Ultra course view; older/closed courses still on Original
+# course view will likely redirect elsewhere and won't match content_item -
+# if `sync` logs "no content items found" for a specific course, that's
+# probably why (Original view support isn't implemented).
+#
+# Each item is <div class="content-list-item" data-content-id="...">.
+# Folders ("Learning Modules") own a title control with id
+# "learning-module-title-<data-content-id>"; leaf items contain a real
+# <a href=...> instead. See blackboard_sync/scraper/content.py for how the
+# folder path is reconstructed from "learning-module-contents-<id>"
+# containers - no code changes needed here for that part.
 content_outline_url_template: "/ultra/courses/{course_id}/outline"
+content_item: "div.content-list-item[data-content-id]"
+content_item_id_attr: "data-content-id"
+content_item_link: "a[href]"
 # A folder/group node that needs to be expanded to reveal children.
 content_folder_toggle: "button[aria-expanded='false']"
-# A leaf content item (file, page, link).
-content_item: "[data-testid='content-item'], li.content-item"
-content_item_title: "[data-testid='content-item-title'], .content-item-title"
-# Link/button that triggers a file download for an item.
-content_item_download_link: "a[href*='bbcswebdav'], a[download]"
+# Leaf items link to their own Ultra detail page (e.g. a document viewer),
+# not a direct file URL - sync_content follows the link, then looks for an
+# actual download control on THAT page using these two selectors. Neither
+# has been verified against a real Southampton document page yet: if
+# `sync` finds content items but downloads 0 files, dump one item's detail
+# page (sync --debug-dump) and fix these two.
+content_detail_download_link: "a[href*='bbcswebdav'], a[download]"
+content_detail_body: "main"
 
-# --- Original course view fallback (older-style courses) ---
+# --- Original course view fallback (older-style courses) - unimplemented ---
+# Placeholder for future Original-view support; content.py doesn't use these yet.
 original_content_frame: "iframe#contentFrame"
 original_content_row: "li.liItem, li.clearfix"
 original_content_link: "a.item"
 
 # --- Announcements ---
+# Verified: each row is <tr class="announcement-item-row">. The body
+# paragraph's DOM text is the full announcement even though it's visually
+# clamped to three lines via CSS.
 announcements_url_template: "/ultra/courses/{course_id}/announcements"
-announcement_item: "[data-testid='announcement-item'], .announcement"
-announcement_title: ".announcement-title, h3"
-announcement_body: ".announcement-body, .vtbegenerated"
-announcement_date: ".announcement-date, time"
+announcement_item: "tr.announcement-item-row"
+announcement_title: "a.list-item-title"
+announcement_body: "p.list-item-body"
+announcement_date: "span.list-item-date-sent"
 
 # --- Grades ---
+# Verified: each row is <tr data-grade-id="...">, with each column's cell
+# identified by aria-describedby pointing at a stable header id.
 grades_url_template: "/ultra/courses/{course_id}/grades"
-grade_row: "[data-testid='grade-row'], tr.grade-row"
-grade_name: ".grade-item-name"
-grade_score: ".grade-item-score"
-grade_feedback: ".grade-item-feedback"
+grade_row: "tr[data-grade-id]"
+grade_name: "td[aria-describedby='course-student-grades-header-itemName']"
+grade_due: "td[aria-describedby='course-student-grades-header-dueDate']"
+grade_status: "td[aria-describedby='course-student-grades-header-status']"
+grade_score: "td[aria-describedby='course-student-grades-header-grade']"
+grade_results: "td[aria-describedby='course-student-grades-header-results']"
 
 # --- Discussions ---
-discussions_url_template: "/ultra/courses/{course_id}/discussions"
+# NOT YET VERIFIED. The course nav bar's "Discussions" tab actually links to
+# /ultra/courses/{course_id}/engagement (Blackboard's newer combined
+# engagement/discussion hub), not .../discussions - that mismatch is why
+# sync previously hit a 404 here. The URL below is now correct, but the
+# forum/thread selectors below are still guesses from before we had a real
+# dump of this page. If `sync` logs "no discussion threads found", dump
+# this page (sync --debug-dump) and fix these three selectors the same way
+# the others above were fixed.
+discussions_url_template: "/ultra/courses/{course_id}/engagement"
 discussion_forum_link: "a[href*='/discussions/']"
 discussion_thread_link: "a[href*='/discussions/threads/']"
 discussion_thread_body: ".discussion-post-body, .vtbegenerated"

@@ -1,13 +1,21 @@
 """Walk a course's content outline (files, folders, and page text) and save
 it into a folder structure mirroring Blackboard's own hierarchy.
 
-Hierarchy reconstruction assumes the outline is rendered as an accessible
-tree (``aria-level`` on each row, folders distinguished by ``aria-expanded``)
-which is how Blackboard Ultra's outline is typically built. If Southampton's
-theme differs, adjust ``content_item_level_attr`` in selectors.yaml, or - if
-levels aren't exposed at all - every item will land flat under the course's
-content/ root, which is a safe (if flatter-than-ideal) fallback rather than
-a crash.
+Verified against a real Southampton Ultra course outline dump: each item is
+a ``<div class="content-list-item" data-content-id="...">``. Folders
+("Learning Modules") wrap a toggle button whose id is
+``learning-module-title-<content-id>``; once expanded, their children appear
+as further ``.content-list-item`` divs nested inside a
+``#learning-module-contents-<content-id>`` container, which is how we
+reconstruct the folder path for each leaf (see ``_ANCESTOR_PATH_JS``).
+
+Leaf items link to their own Ultra detail page (e.g. a "document" viewer)
+rather than exposing a direct file URL in the outline itself, so fetching a
+file is a two-step process: follow the item's link, then look for an actual
+download control on that detail page. What that control looks like hasn't
+been verified against a real Southampton document page yet - if `sync`
+reports 0 files despite finding content items, that's the next thing to fix
+via a debug dump of one such detail page (config: content_detail_download_link).
 """
 
 from __future__ import annotations
@@ -17,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from playwright.sync_api import ElementHandle, Page
+from playwright.sync_api import Page
 
 from ..config import Config
 from ..storage import Manifest, safe_name, unique_path, write_json, write_text
@@ -26,54 +34,62 @@ from .courses import Course
 
 logger = logging.getLogger(__name__)
 
+_ANCESTOR_PATH_JS = """
+el => {
+    const parts = [];
+    let node = el.parentElement;
+    while (node) {
+        if (node.id && node.id.indexOf('learning-module-contents-') === 0) {
+            const suffix = node.id.slice('learning-module-contents-'.length);
+            const titleEl = document.getElementById('learning-module-title-' + suffix);
+            parts.unshift(titleEl ? titleEl.textContent.trim() : suffix);
+        }
+        node = node.parentElement;
+    }
+    return parts;
+}
+"""
+
 
 @dataclass
 class ContentItem:
     item_id: str
     title: str
     path_parts: list[str]
-    has_download: bool
+    href: Optional[str]
 
 
-def _stable_id(el: ElementHandle, title: str, path_parts: list[str], id_attr: str) -> str:
-    native_id = el.get_attribute(id_attr)
-    if native_id:
-        return native_id
-    return "path:" + "/".join([*path_parts, title])
-
-
-def discover_items(page: Page, course: Course, config: Config, debug_dir: Optional[Path]) -> list[tuple[ContentItem, ElementHandle]]:
+def discover_items(page: Page, course: Course, config: Config, debug_dir: Optional[Path]) -> list[ContentItem]:
     sel = config.selectors
     url = config.base_url + sel["content_outline_url_template"].format(course_id=course.course_id)
     goto(page, url, config.timeout_ms, config.request_delay_seconds, settle_selector=sel["content_item"])
     expand_all_folders(page, sel["content_folder_toggle"])
     dump(page, debug_dir, f"{course.course_id}_content_outline")
 
-    level_attr = sel.get("content_item_level_attr", "aria-level")
-    id_attr = sel.get("content_item_id_attr", "id")
+    id_attr = sel.get("content_item_id_attr", "data-content-id")
+    link_selector = sel.get("content_item_link", "a[href]")
 
-    stack: list[tuple[int, str]] = []
-    out: list[tuple[ContentItem, ElementHandle]] = []
-
+    out: list[ContentItem] = []
     for el in page.query_selector_all(sel["content_item"]):
-        title_el = el.query_selector(sel["content_item_title"]) or el
-        title = (title_el.inner_text() or "").strip() or "untitled"
-
-        level_raw = el.get_attribute(level_attr)
-        level = int(level_raw) if level_raw and level_raw.isdigit() else 1
-        is_folder = el.get_attribute("aria-expanded") is not None
-
-        while stack and stack[-1][0] >= level:
-            stack.pop()
-        path_parts = [name for _, name in stack]
-
-        if is_folder:
-            stack.append((level, title))
+        content_id = el.get_attribute(id_attr)
+        if not content_id:
             continue
 
-        has_download = el.query_selector(sel["content_item_download_link"]) is not None
-        item_id = _stable_id(el, title, path_parts, id_attr)
-        out.append((ContentItem(item_id=item_id, title=title, path_parts=path_parts, has_download=has_download), el))
+        # A folder ("Learning Module") is identified by owning a title
+        # control with this exact id - checked precisely (not just "does
+        # this element contain any expand button anywhere") because once
+        # expanded, a folder's children live *inside* the same DOM subtree
+        # and would otherwise be mistaken for the folder's own link/title.
+        is_folder = el.query_selector(f'[id="learning-module-title-{content_id}"]') is not None
+        if is_folder:
+            continue
+
+        link = el.query_selector(link_selector)
+        title = ((link.inner_text() if link else el.inner_text()) or "").strip() or "untitled"
+        href = link.get_attribute("href") if link else None
+
+        path_parts = el.evaluate(_ANCESTOR_PATH_JS)
+        out.append(ContentItem(item_id=content_id, title=title, path_parts=path_parts, href=href))
 
     if not out:
         logger.warning(
@@ -87,51 +103,54 @@ def discover_items(page: Page, course: Course, config: Config, debug_dir: Option
 def sync_content(page: Page, course: Course, course_dir: Path, config: Config, manifest: Manifest, debug_dir: Optional[Path]) -> int:
     sel = config.selectors
     items = discover_items(page, course, config, debug_dir)
-    downloaded = 0
+    saved = 0
 
-    for item, el in items:
+    download_selector = sel.get("content_detail_download_link", "a[href*='bbcswebdav'], a[download]")
+    body_selector = sel.get("content_detail_body", "main")
+
+    for item in items:
         target_dir = course_dir / "content"
         for part in item.path_parts:
             target_dir = target_dir / safe_name(part)
 
-        if item.has_download:
-            fingerprint = f"file:{item.title}"
-            if manifest.is_unchanged(item.item_id, fingerprint):
-                continue
-            link = el.query_selector(sel["content_item_download_link"])
-            if link is None:
-                continue
-            try:
-                with page.expect_download(timeout=config.timeout_ms) as dl_info:
-                    link.click()
-                download = dl_info.value
-                dest = unique_path(target_dir, download.suggested_filename or safe_name(item.title))
-                download.save_as(str(dest))
-                manifest.record(item.item_id, str(dest), fingerprint)
-                downloaded += 1
-                logger.info("Downloaded: %s", dest)
-            except Exception:
-                logger.exception("Failed to download item %r in course %s", item.title, course.course_id)
+        if not item.href:
             continue
+
+        fingerprint = f"{item.href}:{item.title}"
+        if manifest.is_unchanged(item.item_id, fingerprint):
+            continue
+
+        goto(page, item.href, config.timeout_ms, config.request_delay_seconds)
+        dump(page, debug_dir, f"{course.course_id}_item_{item.item_id}")
+
+        if config.content.files:
+            download_link = page.query_selector(download_selector)
+            if download_link is not None:
+                try:
+                    with page.expect_download(timeout=config.timeout_ms) as dl_info:
+                        download_link.click()
+                    download = dl_info.value
+                    dest = unique_path(target_dir, download.suggested_filename or safe_name(item.title))
+                    download.save_as(str(dest))
+                    manifest.record(item.item_id, str(dest), fingerprint)
+                    saved += 1
+                    logger.info("Downloaded: %s", dest)
+                    continue
+                except Exception:
+                    logger.exception("Failed to download item %r in course %s", item.title, course.course_id)
 
         if not config.content.pages:
             continue
 
-        try:
-            body_html = el.inner_html()
-        except Exception:
-            body_html = ""
-        fingerprint = f"page:{hash(body_html)}"
-        if manifest.is_unchanged(item.item_id, fingerprint):
-            continue
-
+        body_el = page.query_selector(body_selector)
+        body_html = body_el.inner_html() if body_el else ""
         dest = unique_path(target_dir, safe_name(item.title) + ".html")
-        write_text(dest, body_html)
+        write_text(dest, body_html or item.title)
         write_json(
             dest.with_suffix(".meta.json"),
-            {"title": item.title, "path": item.path_parts, "course_id": course.course_id},
+            {"title": item.title, "path": item.path_parts, "href": item.href, "course_id": course.course_id},
         )
         manifest.record(item.item_id, str(dest), fingerprint)
-        downloaded += 1
+        saved += 1
 
-    return downloaded
+    return saved

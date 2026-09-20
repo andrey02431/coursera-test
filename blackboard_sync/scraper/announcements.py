@@ -22,8 +22,9 @@ def sync_announcements(page: Page, course: Course, course_dir: Path, config: Con
 
     target_dir = course_dir / "announcements"
     saved = 0
+    rows = page.query_selector_all(sel["announcement_item"])
 
-    for el in page.query_selector_all(sel["announcement_item"]):
+    for el in rows:
         title_el = el.query_selector(sel["announcement_title"])
         body_el = el.query_selector(sel["announcement_body"])
         date_el = el.query_selector(sel["announcement_date"])
@@ -44,7 +45,7 @@ def sync_announcements(page: Page, course: Course, course_dir: Path, config: Con
         manifest.record(item_id, str(dest), fingerprint)
         saved += 1
 
-    if not saved and not manifest.get("announcements:checked"):
+    if not rows:
         logger.info("No announcements found for course %s (or selectors need tuning).", course.course_id)
 
     return saved
