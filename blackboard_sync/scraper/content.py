@@ -29,7 +29,7 @@ from playwright.sync_api import Page
 
 from ..config import Config
 from ..storage import Manifest, safe_name, unique_path, write_json, write_text
-from .common import dump, expand_all_folders, goto
+from .common import dump, expand_all_folders, goto, is_navigable
 from .courses import Course
 
 logger = logging.getLogger(__name__)
@@ -100,13 +100,6 @@ def discover_items(page: Page, course: Course, config: Config, debug_dir: Option
     return out
 
 
-def _is_navigable(href: Optional[str]) -> bool:
-    if not href:
-        return False
-    lowered = href.strip().lower()
-    return not (lowered.startswith("#") or lowered.startswith("javascript:"))
-
-
 def sync_content(page: Page, course: Course, course_dir: Path, config: Config, manifest: Manifest, debug_dir: Optional[Path]) -> int:
     sel = config.selectors
     items = discover_items(page, course, config, debug_dir)
@@ -128,7 +121,7 @@ def sync_content(page: Page, course: Course, course_dir: Path, config: Config, m
         for part in item.path_parts:
             target_dir = target_dir / safe_name(part)
 
-        if not _is_navigable(item.href):
+        if not is_navigable(item.href):
             # Some items (accessibility "skip to content" style anchors
             # picked up by mistake, or genuinely non-link content types)
             # have no real page to follow - nothing to fetch.

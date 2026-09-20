@@ -65,6 +65,18 @@ def dump(page: Page, debug_dir: Optional[Path], name: str) -> None:
         logger.exception("Failed to write debug dump for %s", name)
 
 
+def is_navigable(href: Optional[str]) -> bool:
+    """False for hrefs that Playwright can't/shouldn't navigate to directly:
+    fragment-only anchors (often an unrelated accessibility "skip to
+    content" link picked up incidentally by a generic ``a[href]`` selector)
+    and javascript: pseudo-links.
+    """
+    if not href:
+        return False
+    lowered = href.strip().lower()
+    return not (lowered.startswith("#") or lowered.startswith("javascript:"))
+
+
 def extract_id(value: str, pattern: str) -> Optional[str]:
     """Pull an ID out of an attribute value (an href, or an element ``id``
     like ``course-link-_240080_1``) using a configurable regex, so the

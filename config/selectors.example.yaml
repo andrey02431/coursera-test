@@ -93,18 +93,22 @@ grade_score: "td[aria-describedby='course-student-grades-header-grade']"
 grade_results: "td[aria-describedby='course-student-grades-header-results']"
 
 # --- Discussions ---
-# NOT YET VERIFIED. The course nav bar's "Discussions" tab actually links to
+# The course nav bar's "Discussions" tab actually links to
 # /ultra/courses/{course_id}/engagement (Blackboard's newer combined
 # engagement/discussion hub), not .../discussions - that mismatch is why
-# sync previously hit a 404 here. The URL below is now correct, but the
-# forum/thread selectors below are still guesses from before we had a real
-# dump of this page. If `sync` logs "no discussion threads found", dump
-# this page (sync --debug-dump) and fix these three selectors the same way
-# the others above were fixed.
+# sync previously hit a 404 here.
+#
+# Verified: the engagement page reuses the exact same content-list-item
+# component as the course outline, so topic discovery just reuses
+# content_item/content_item_id_attr/content_item_link above (no separate
+# selectors needed - discussion_item/_id_attr/_link exist only as an
+# override if that ever needs to differ). What's NOT yet verified is a
+# topic page that actually has posts on it (the one seen during testing had
+# none), so discussion_thread_body just falls back to content_detail_body
+# for now - if `sync` saves near-empty discussion HTML despite a topic
+# clearly having posts, dump that topic page and set a more specific
+# selector here.
 discussions_url_template: "/ultra/courses/{course_id}/engagement"
-discussion_forum_link: "a[href*='/discussions/']"
-discussion_thread_link: "a[href*='/discussions/threads/']"
-discussion_thread_body: ".discussion-post-body, .vtbegenerated"
 
 # --- Login detection ---
 # If, after navigating to a Blackboard URL, the resulting page URL contains
