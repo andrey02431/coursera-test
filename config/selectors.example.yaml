@@ -52,12 +52,17 @@ content_item_link: "a[href]"
 # A folder/group node that needs to be expanded to reveal children.
 content_folder_toggle: "button[aria-expanded='false']"
 # Leaf items link to their own Ultra detail page (e.g. a document viewer),
-# not a direct file URL - sync_content follows the link, then looks for an
-# actual download control on THAT page using these two selectors. Neither
-# has been verified against a real Southampton document page yet: if
-# `sync` finds content items but downloads 0 files, dump one item's detail
-# page (sync --debug-dump) and fix these two.
-content_detail_download_link: "a[href*='bbcswebdav'], a[download]"
+# not a direct file URL. Verified against a real Southampton document page:
+# the real file lives at a hidden (display:none, not clickable)
+# <a data-ally-file-preview-url="https://.../bbcswebdav/..."> - we read the
+# URL out of the attribute and fetch it directly with the session's
+# cookies rather than clicking anything. The filename comes from a sibling
+# element's aria-label ("Preview File <filename>").
+content_detail_file_link: "a[data-ally-file-preview-url]"
+content_detail_file_url_attr: "data-ally-file-preview-url"
+content_detail_file_label: "[aria-label^='Preview File ']"
+# Fallback when an item has no file attachment at all - save whatever the
+# detail page's main content region contains as an HTML page instead.
 content_detail_body: "main"
 
 # --- Original course view fallback (older-style courses) - unimplemented ---

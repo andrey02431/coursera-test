@@ -10,12 +10,12 @@ as further ``.content-list-item`` divs nested inside a
 reconstruct the folder path for each leaf (see ``_ANCESTOR_PATH_JS``).
 
 Leaf items link to their own Ultra detail page (e.g. a "document" viewer)
-rather than exposing a direct file URL in the outline itself, so fetching a
-file is a two-step process: follow the item's link, then look for an actual
-download control on that detail page. What that control looks like hasn't
-been verified against a real Southampton document page yet - if `sync`
-reports 0 files despite finding content items, that's the next thing to fix
-via a debug dump of one such detail page (config: content_detail_download_link).
+rather than exposing a direct file URL in the outline itself. Verified
+against a real Southampton document page: the actual file is at a hidden
+``<a data-ally-file-preview-url="https://.../bbcswebdav/...">`` on that
+detail page - not clickable (it's display:none), so we read the URL out of
+the attribute and fetch it directly with the session's cookies instead of
+simulating a click.
 """
 
 from __future__ import annotations
@@ -100,12 +100,27 @@ def discover_items(page: Page, course: Course, config: Config, debug_dir: Option
     return out
 
 
+def _is_navigable(href: Optional[str]) -> bool:
+    if not href:
+        return False
+    lowered = href.strip().lower()
+    return not (lowered.startswith("#") or lowered.startswith("javascript:"))
+
+
 def sync_content(page: Page, course: Course, course_dir: Path, config: Config, manifest: Manifest, debug_dir: Optional[Path]) -> int:
     sel = config.selectors
     items = discover_items(page, course, config, debug_dir)
     saved = 0
 
-    download_selector = sel.get("content_detail_download_link", "a[href*='bbcswebdav'], a[download]")
+    # Blackboard renders the real download URL into a hidden <a
+    # data-ally-file-preview-url="https://.../bbcswebdav/..."> on the
+    # item's own detail page (verified against a real Southampton document
+    # page) - it's not visible/clickable, so we read the URL out of the
+    # attribute and fetch it directly with the logged-in session's cookies,
+    # rather than trying to click a hidden element.
+    file_link_selector = sel.get("content_detail_file_link", "a[data-ally-file-preview-url]")
+    file_url_attr = sel.get("content_detail_file_url_attr", "data-ally-file-preview-url")
+    file_label_selector = sel.get("content_detail_file_label", "[aria-label^='Preview File ']")
     body_selector = sel.get("content_detail_body", "main")
 
     for item in items:
@@ -113,7 +128,10 @@ def sync_content(page: Page, course: Course, course_dir: Path, config: Config, m
         for part in item.path_parts:
             target_dir = target_dir / safe_name(part)
 
-        if not item.href:
+        if not _is_navigable(item.href):
+            # Some items (accessibility "skip to content" style anchors
+            # picked up by mistake, or genuinely non-link content types)
+            # have no real page to follow - nothing to fetch.
             continue
 
         fingerprint = f"{item.href}:{item.title}"
@@ -124,20 +142,29 @@ def sync_content(page: Page, course: Course, course_dir: Path, config: Config, m
         dump(page, debug_dir, f"{course.course_id}_item_{item.item_id}")
 
         if config.content.files:
-            download_link = page.query_selector(download_selector)
-            if download_link is not None:
-                try:
-                    with page.expect_download(timeout=config.timeout_ms) as dl_info:
-                        download_link.click()
-                    download = dl_info.value
-                    dest = unique_path(target_dir, download.suggested_filename or safe_name(item.title))
-                    download.save_as(str(dest))
-                    manifest.record(item.item_id, str(dest), fingerprint)
-                    saved += 1
-                    logger.info("Downloaded: %s", dest)
-                    continue
-                except Exception:
-                    logger.exception("Failed to download item %r in course %s", item.title, course.course_id)
+            file_link = page.query_selector(file_link_selector)
+            if file_link is not None:
+                file_url = file_link.get_attribute(file_url_attr)
+                if file_url:
+                    try:
+                        response = page.context.request.get(file_url, timeout=config.timeout_ms)
+                        if response.ok:
+                            label_el = page.query_selector(file_label_selector)
+                            label = label_el.get_attribute("aria-label") if label_el else None
+                            filename = None
+                            if label and label.lower().startswith("preview file "):
+                                filename = label[len("preview file "):].strip()
+                            dest = unique_path(target_dir, filename or safe_name(item.title))
+                            dest.write_bytes(response.body())
+                            manifest.record(item.item_id, str(dest), fingerprint)
+                            saved += 1
+                            logger.info("Downloaded: %s", dest)
+                            continue
+                        logger.warning(
+                            "Download request for %r returned HTTP %s", item.title, response.status
+                        )
+                    except Exception:
+                        logger.exception("Failed to download item %r in course %s", item.title, course.course_id)
 
         if not config.content.pages:
             continue
