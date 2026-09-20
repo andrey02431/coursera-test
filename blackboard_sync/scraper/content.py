@@ -147,7 +147,7 @@ def sync_content(page: Page, course: Course, course_dir: Path, config: Config, m
                             filename = None
                             if label and label.lower().startswith("preview file "):
                                 filename = label[len("preview file "):].strip()
-                            dest = unique_path(target_dir, filename or safe_name(item.title))
+                            dest = unique_path(target_dir, safe_name(filename) if filename else safe_name(item.title))
                             dest.write_bytes(response.body())
                             manifest.record(item.item_id, str(dest), fingerprint)
                             saved += 1
