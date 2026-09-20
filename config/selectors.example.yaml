@@ -1,0 +1,72 @@
+# CSS/role selectors used to find things in Blackboard's UI.
+#
+# IMPORTANT: these are best-effort starting points based on Blackboard
+# Ultra's default (unbranded) theme. Every institution customises Blackboard
+# to some degree, and this file was written without access to Southampton's
+# live portal. Expect to need to tweak a few of these.
+#
+# Workflow for fixing a selector that doesn't match:
+#   1. Run: python -m blackboard_sync discover --debug-dump
+#   2. Open debug/<page-name>.html in a browser, or the .png screenshot.
+#   3. Right-click the element you need in a real browser's devtools on the
+#      live site, "Inspect", find a stable attribute (data-testid, role,
+#      aria-label are more stable than generated class names).
+#   4. Update the matching key below. No Python code changes needed.
+#
+# Copy this file to selectors.yaml before editing (selectors.yaml is
+# gitignored so your local tweaks don't need to be committed, though there's
+# no harm in them - nothing secret lives here).
+
+# --- Course list (landing page after login / "My Courses") ---
+course_list_url_path: "/ultra/course"
+# Each course tile/link on the My Courses page.
+course_tile: "a[href*='/ultra/courses/']"
+course_id_attr: "href"          # attribute to pull the course ID out of
+course_name: "[data-testid='course-name'], .course-name"
+
+# --- Course content outline (Ultra course view) ---
+content_outline_url_template: "/ultra/courses/{course_id}/outline"
+# A folder/group node that needs to be expanded to reveal children.
+content_folder_toggle: "button[aria-expanded='false']"
+# A leaf content item (file, page, link).
+content_item: "[data-testid='content-item'], li.content-item"
+content_item_title: "[data-testid='content-item-title'], .content-item-title"
+# Link/button that triggers a file download for an item.
+content_item_download_link: "a[href*='bbcswebdav'], a[download]"
+
+# --- Original course view fallback (older-style courses) ---
+original_content_frame: "iframe#contentFrame"
+original_content_row: "li.liItem, li.clearfix"
+original_content_link: "a.item"
+
+# --- Announcements ---
+announcements_url_template: "/ultra/courses/{course_id}/announcements"
+announcement_item: "[data-testid='announcement-item'], .announcement"
+announcement_title: ".announcement-title, h3"
+announcement_body: ".announcement-body, .vtbegenerated"
+announcement_date: ".announcement-date, time"
+
+# --- Grades ---
+grades_url_template: "/ultra/courses/{course_id}/grades"
+grade_row: "[data-testid='grade-row'], tr.grade-row"
+grade_name: ".grade-item-name"
+grade_score: ".grade-item-score"
+grade_feedback: ".grade-item-feedback"
+
+# --- Discussions ---
+discussions_url_template: "/ultra/courses/{course_id}/discussions"
+discussion_forum_link: "a[href*='/discussions/']"
+discussion_thread_link: "a[href*='/discussions/threads/']"
+discussion_thread_body: ".discussion-post-body, .vtbegenerated"
+
+# --- Login detection ---
+# If, after navigating to a Blackboard URL, the resulting page URL contains
+# any of these substrings, we're looking at a login/SSO page rather than
+# Blackboard content - i.e. the saved session has expired.
+login_url_markers:
+  - "login"
+  - "idp"
+  - "sso"
+  - "authn"
+  - "signin"
+  - "microsoftonline.com"

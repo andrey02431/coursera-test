@@ -1,0 +1,42 @@
+# Copy this file to config.yaml and edit before running anything.
+# config.yaml is gitignored on purpose - it's local machine config, not secret,
+# but there's no reason for it to live in version control.
+
+# Base URL of your institution's Blackboard instance.
+base_url: "https://blackboard.soton.ac.uk"
+
+# Where downloaded content is written.
+output_dir: "./data"
+
+# Where the logged-in browser profile is stored after `bbsync login`.
+# Treat this directory like a saved password - never share or commit it.
+profile_dir: "./.auth/profile"
+
+# Where per-run logs are written.
+log_dir: "./logs"
+
+# Where --debug-dump saves HTML/screenshots for selector tuning.
+debug_dir: "./debug"
+
+# Seconds to wait between page navigations / downloads. Keep this
+# conservative - this is a shared university system, not a target to
+# hammer for speed.
+request_delay_seconds: 1.5
+
+# Playwright navigation/download timeout, in milliseconds.
+timeout_ms: 30000
+
+# Which content types to sync. All on by default per user preference;
+# turn any of these off if you don't want them.
+content:
+  files: true
+  pages: true
+  announcements: true
+  grades: true
+  discussions: true
+
+# Restrict sync to specific course IDs (as printed by `bbsync discover`).
+# Leave empty to sync every course you're enrolled in.
+course_filter: []
+
+log_level: "INFO"

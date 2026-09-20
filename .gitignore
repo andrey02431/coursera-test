@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Secrets / session state - never commit a logged-in browser profile
+.auth/
+config/config.yaml
+
+# Output data
+data/
+logs/
+debug/
+
+# OS
+.DS_Store
