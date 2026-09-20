@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def sync_discussions(page: Page, course: Course, course_dir: Path, config: Config, manifest: Manifest, debug_dir: Optional[Path]) -> int:
     sel = config.selectors
     url = config.base_url + sel["discussions_url_template"].format(course_id=course.course_id)
-    goto(page, url, config.timeout_ms, config.request_delay_seconds)
+    goto(page, url, config.timeout_ms, config.request_delay_seconds, settle_selector=sel["discussion_forum_link"])
     dump(page, debug_dir, f"{course.course_id}_discussions")
 
     saved = 0
@@ -29,7 +29,7 @@ def sync_discussions(page: Page, course: Course, course_dir: Path, config: Confi
         forum_urls.append((forum_name, href if href.startswith("http") else config.base_url + href))
 
     for forum_name, forum_url in forum_urls:
-        goto(page, forum_url, config.timeout_ms, config.request_delay_seconds)
+        goto(page, forum_url, config.timeout_ms, config.request_delay_seconds, settle_selector=sel["discussion_thread_link"])
         dump(page, debug_dir, f"{course.course_id}_discussion_{safe_name(forum_name)}")
 
         thread_links = page.query_selector_all(sel["discussion_thread_link"])
@@ -41,7 +41,7 @@ def sync_discussions(page: Page, course: Course, course_dir: Path, config: Confi
 
         for thread_title, thread_url in thread_urls:
             item_id = f"discussion:{forum_name}:{thread_title}"
-            goto(page, thread_url, config.timeout_ms, config.request_delay_seconds)
+            goto(page, thread_url, config.timeout_ms, config.request_delay_seconds, settle_selector=sel["discussion_thread_body"])
             body_el = page.query_selector(sel["discussion_thread_body"])
             body = body_el.inner_html() if body_el else ""
             fingerprint = f"{len(body)}"

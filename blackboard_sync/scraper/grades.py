@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def sync_grades(page: Page, course: Course, course_dir: Path, config: Config, debug_dir: Optional[Path]) -> int:
     sel = config.selectors
     url = config.base_url + sel["grades_url_template"].format(course_id=course.course_id)
-    goto(page, url, config.timeout_ms, config.request_delay_seconds)
+    goto(page, url, config.timeout_ms, config.request_delay_seconds, settle_selector=sel["grade_row"])
     dump(page, debug_dir, f"{course.course_id}_grades")
 
     rows = []

@@ -45,7 +45,7 @@ def _stable_id(el: ElementHandle, title: str, path_parts: list[str], id_attr: st
 def discover_items(page: Page, course: Course, config: Config, debug_dir: Optional[Path]) -> list[tuple[ContentItem, ElementHandle]]:
     sel = config.selectors
     url = config.base_url + sel["content_outline_url_template"].format(course_id=course.course_id)
-    goto(page, url, config.timeout_ms, config.request_delay_seconds)
+    goto(page, url, config.timeout_ms, config.request_delay_seconds, settle_selector=sel["content_item"])
     expand_all_folders(page, sel["content_folder_toggle"])
     dump(page, debug_dir, f"{course.course_id}_content_outline")
 

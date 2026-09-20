@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def sync_announcements(page: Page, course: Course, course_dir: Path, config: Config, manifest: Manifest, debug_dir: Optional[Path]) -> int:
     sel = config.selectors
     url = config.base_url + sel["announcements_url_template"].format(course_id=course.course_id)
-    goto(page, url, config.timeout_ms, config.request_delay_seconds)
+    goto(page, url, config.timeout_ms, config.request_delay_seconds, settle_selector=sel["announcement_item"])
     dump(page, debug_dir, f"{course.course_id}_announcements")
 
     target_dir = course_dir / "announcements"

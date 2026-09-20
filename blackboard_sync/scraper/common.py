@@ -12,18 +12,39 @@ from pathlib import Path
 from typing import Optional
 
 from playwright.sync_api import Page
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 logger = logging.getLogger(__name__)
 
 _COURSE_ID_RE = re.compile(r"/ultra/courses/([^/?#]+)")
 
 
-def goto(page: Page, url: str, timeout_ms: int, delay_seconds: float) -> None:
+def goto(page: Page, url: str, timeout_ms: int, delay_seconds: float, settle_selector: Optional[str] = None) -> None:
     """Navigate with a polite delay before the request, so a full sync
     doesn't hammer the server with back-to-back requests.
+
+    Blackboard Ultra is a client-rendered SPA: the network can go idle
+    (page loaded, initial API calls done) well before the actual content
+    has finished rendering - it shows a spinner in between. If
+    ``settle_selector`` is given, we wait for it to actually appear before
+    moving on (falling back to a fixed grace period if it never shows, so a
+    genuinely-empty page or a wrong selector doesn't hang forever). Without
+    a selector, we just wait a fixed grace period.
     """
     time.sleep(delay_seconds)
     page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+    if settle_selector:
+        try:
+            page.wait_for_selector(settle_selector, timeout=timeout_ms, state="attached")
+            return
+        except PlaywrightTimeoutError:
+            logger.warning(
+                "Timed out waiting for %r to appear on %s - the page may still be "
+                "showing a loading spinner, or the selector needs tuning. "
+                "Continuing anyway so a debug dump can be captured.",
+                settle_selector, url,
+            )
+    page.wait_for_timeout(2000)
 
 
 def dump(page: Page, debug_dir: Optional[Path], name: str) -> None:

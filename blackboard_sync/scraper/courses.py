@@ -25,7 +25,7 @@ class Course:
 def list_courses(page: Page, config: Config, debug_dir: Optional[Path]) -> list[Course]:
     sel = config.selectors
     url = config.base_url + sel["course_list_url_path"]
-    goto(page, url, config.timeout_ms, config.request_delay_seconds)
+    goto(page, url, config.timeout_ms, config.request_delay_seconds, settle_selector=sel["course_tile"])
     dump(page, debug_dir, "course_list")
 
     courses: dict[str, Course] = {}
