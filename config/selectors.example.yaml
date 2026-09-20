@@ -18,13 +18,26 @@
 # no harm in them - nothing secret lives here).
 
 # --- Course list (landing page after login / "My Courses") ---
+# Confirmed against a real Southampton debug dump: /ultra/course renders
+# Blackboard's older Angular "Base Navigation" course list (not the Ultra
+# React app), and each course tile is a <a class="course-title" ...
+# id="course-link-_240080_1"> with href="javascript:void(0);" - the real
+# course ID (e.g. "_240080_1") lives in the *id* attribute, extracted via
+# course_id_regex below, not in an href.
 course_list_url_path: "/ultra/course"
-# Each course tile/link on the My Courses page.
-course_tile: "a[href*='/ultra/courses/']"
-course_id_attr: "href"          # attribute to pull the course ID out of
-course_name: "[data-testid='course-name'], .course-name"
+course_tile: "a.course-title"
+course_id_attr: "id"                  # attribute to pull the course ID out of
+course_id_regex: "^course-link-(.+)$" # regex applied to course_id_attr's value
+course_name: "h4.js-course-title-element, .js-course-title-element"
 
 # --- Course content outline (Ultra course view) ---
+# We navigate straight to this URL using the ID extracted from the course
+# list, without clicking through. This works for courses using Ultra course
+# view. Older/closed courses still on Original course view will likely
+# redirect elsewhere and won't match content_item below - if `sync` logs
+# "no content items found" for a specific course, that's probably why; the
+# original_content_* selectors below are a placeholder for adding Original
+# view support later.
 content_outline_url_template: "/ultra/courses/{course_id}/outline"
 # A folder/group node that needs to be expanded to reveal children.
 content_folder_toggle: "button[aria-expanded='false']"

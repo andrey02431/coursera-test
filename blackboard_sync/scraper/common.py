@@ -16,8 +16,6 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 logger = logging.getLogger(__name__)
 
-_COURSE_ID_RE = re.compile(r"/ultra/courses/([^/?#]+)")
-
 
 def goto(page: Page, url: str, timeout_ms: int, delay_seconds: float, settle_selector: Optional[str] = None) -> None:
     """Navigate with a polite delay before the request, so a full sync
@@ -67,8 +65,12 @@ def dump(page: Page, debug_dir: Optional[Path], name: str) -> None:
         logger.exception("Failed to write debug dump for %s", name)
 
 
-def extract_course_id(href: str) -> Optional[str]:
-    match = _COURSE_ID_RE.search(href)
+def extract_id(value: str, pattern: str) -> Optional[str]:
+    """Pull an ID out of an attribute value (an href, or an element ``id``
+    like ``course-link-_240080_1``) using a configurable regex, so the
+    convention Blackboard happens to use doesn't need a code change.
+    """
+    match = re.search(pattern, value or "")
     return match.group(1) if match else None
 
 
