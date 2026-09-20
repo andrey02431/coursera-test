@@ -36,10 +36,21 @@ def goto(page: Page, url: str, timeout_ms: int, delay_seconds: float, settle_sel
             page.wait_for_selector(settle_selector, timeout=timeout_ms, state="attached")
             return
         except PlaywrightTimeoutError:
+            pass
+        # One retry with a fresh, shorter wait: a page that was still on a
+        # loading skeleton (not a spinner) under load/rate-limiting can
+        # legitimately take longer than one timeout to populate, and giving
+        # up after a single attempt turned a transient slow load into a
+        # full sync failure during testing. A second genuinely-broken
+        # selector still fails here rather than looping forever.
+        try:
+            page.wait_for_selector(settle_selector, timeout=min(timeout_ms, 20000), state="attached")
+            return
+        except PlaywrightTimeoutError:
             logger.warning(
-                "Timed out waiting for %r to appear on %s - the page may still be "
-                "showing a loading spinner, or the selector needs tuning. "
-                "Continuing anyway so a debug dump can be captured.",
+                "Timed out waiting for %r to appear on %s (twice) - the page may "
+                "still be loading, or the selector needs tuning. Continuing anyway "
+                "so a debug dump can be captured.",
                 settle_selector, url,
             )
     page.wait_for_timeout(2000)

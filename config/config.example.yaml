@@ -23,8 +23,11 @@ debug_dir: "./debug"
 # hammer for speed.
 request_delay_seconds: 1.5
 
-# Playwright navigation/download timeout, in milliseconds.
-timeout_ms: 30000
+# Playwright navigation/download timeout, in milliseconds. Some Ultra pages
+# (especially the course list, with many terms/rows) can be slow to finish
+# rendering under load - if you see "Timed out waiting for ... (twice)" in
+# the logs, raise this further rather than assuming a selector is wrong.
+timeout_ms: 45000
 
 # Which content types to sync. All on by default per user preference;
 # turn any of these off if you don't want them.
