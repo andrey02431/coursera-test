@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -42,15 +43,27 @@ def capture_during(page: Page, out_dir: Path, label: str) -> dict:
     ``counter["n"]`` from the returned dict - capture happens
     asynchronously as responses arrive, so the count isn't known until
     after navigation/waiting is done).
+
+    Playwright's Python sync API can invoke this callback from more than
+    one thread for overlapping responses - confirmed on a live run, where
+    "23 captured" left only 9 files on disk with gaps in the numbering,
+    meaning concurrent calls read the same counter value and silently
+    clobbered each other's file. The lock makes the read-increment-assign
+    atomic so every response gets a genuinely unique filename; the slower
+    body-fetch/write after that can still happen in any order safely, since
+    each has already claimed a distinct number.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     counter = {"n": 0}
+    lock = threading.Lock()
 
     def on_response(response: Response) -> None:
         try:
             if not _looks_like_api(response) or response.status >= 400:
                 return
-            counter["n"] += 1
+            with lock:
+                counter["n"] += 1
+                n = counter["n"]
             try:
                 body = response.json()
             except Exception:
@@ -64,7 +77,7 @@ def capture_during(page: Page, out_dir: Path, label: str) -> dict:
                 "response_headers": dict(response.headers),
                 "body": body,
             }
-            path = out_dir / f"{label}_{counter['n']:03d}.json"
+            path = out_dir / f"{label}_{n:03d}.json"
             path.write_text(json.dumps(record, indent=2, default=str, ensure_ascii=False), encoding="utf-8")
         except Exception:
             logger.exception("Failed to capture API response for %s", response.url)
