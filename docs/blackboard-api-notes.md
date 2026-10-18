@@ -5,12 +5,81 @@ Everything below was reverse-engineered against a real logged-in session
 during development of this tool - nothing here is from Blackboard's own
 documentation unless explicitly marked as such.
 
-**Status: no true JSON API endpoints captured yet.** Everything in this
-document so far comes from parsing Blackboard's rendered HTML (the
-approach `blackboard_sync/scraper/*.py` currently uses), not from
-Blackboard's own internal JSON calls. The `discover-api` command
-(`blackboard_sync/scraper/api_capture.py`) exists to capture those and has
-not been run against a real account yet - see "Next step" at the bottom.
+**Status: course discovery is now a real API call** (see below) -
+`blackboard_sync/scraper/courses.py` no longer renders or scrapes any
+page for the course list. Content/announcements/grades/discussions are
+still HTML-page scraping (the sections further down); capturing their real
+API equivalents is the next step - see "Not yet done" at the bottom.
+
+## Confirmed: course list via the real API (no page rendering needed)
+
+```
+GET /learn/api/v1/users/{userId}/memberships
+    ?expand=course.effectiveAvailability,course.permissions,courseRole
+    &includeCount=true&limit=10000
+```
+
+Cookie-authenticated like everything else; `{userId}` comes from
+`GET /learn/api/v1/users/me` (just needs the `id` field from that
+response). Both implemented in `blackboard_sync/scraper/courses.py` via
+`page.context.request.get(...)` - no page navigation, no waiting for
+Angular to render, no selector tuning. This fully replaced the old
+`/ultra/course` DOM-scraping approach (see "Deprecated" below), which was
+the single largest source of flakiness in the whole tool (skeleton-loading
+races the settle-selector retry logic couldn't reliably outlast). It also
+returned a course the DOM scraper's course list never surfaced at all (a
+Classic/Original-view one), so it's strictly more complete, not just more
+reliable.
+
+Response shape - one entry per `results[]`:
+
+```json
+{
+  "courseId": "_240080_1",
+  "course": {
+    "id": "_240080_1",
+    "name": "SSPC2002 Techno Harms: Discrimination, Conspiracy Theories and Extremism (44138-26-27)",
+    "displayName": "SSPC2002 Techno Harms: Discrimination, Conspiracy Theories and Extremism (44138-26-27)",
+    "displayId": "SSPC2002-44138-26-27",
+    "externalAccessUrl": "https://blackboard.soton.ac.uk/ultra/courses/_240080_1/outline",
+    "ultraStatus": "ULTRA",
+    "courseViewOption": "CHOOSE_ULTRA",
+    "isClosed": false,
+    "isAvailable": true,
+    "effectiveAvailability": true,
+    "term": { "id": "_465_1", "name": "2026-27 Modules", "startDate": "...", "endDate": "..." }
+  },
+  "courseRole": { "identifier": "S", "roleBucket": "TAKING" }
+}
+```
+
+Key fields the scraper relies on: `course.id`, `course.displayName`,
+`course.externalAccessUrl` (ready-to-use outline URL for Ultra courses),
+`course.ultraStatus` (`"ULTRA"` vs `"CLASSIC"` - only Ultra is supported;
+Classic ones use `course.homePageUrl` instead, something like
+`/webapps/blackboard/execute/courseMain?course_id=_184556_1`, and need an
+entirely different - unimplemented - Original-view scraper), and
+`course.isClosed`.
+
+## Deprecated: the old DOM-based course list
+
+Kept here for context on what broke, not as something to fix further.
+`/ultra/course` renders Blackboard's older Angular "Base Navigation" course
+list (not the Ultra React app). Each course tile was:
+
+```html
+<a class="course-title" id="course-link-_240080_1" href="javascript:void(0);"
+   ng-click="baseCourses.handleCourseLinkClick(membership.course, $event)">
+  <h4 id="course-name-_240080_1">SSPC2002 Techno Harms: ...</h4>
+</a>
+```
+
+getting the course ID required parsing it out of the tile's own `id`
+attribute (`course-link-(.+)`) since the `href` was a no-op Angular click
+handler - and even then, the page's course rows were Angular-rendered
+skeleton placeholders that didn't reliably populate within any timeout we
+tried, confirmed repeatedly on live runs. The API call above has none of
+these problems.
 
 ## Why not the officially documented Blackboard REST API
 
@@ -38,24 +107,6 @@ with an authenticated session's cookies. All relative to
 
 `{course_id}` and `{content_id}` both look like `_240080_1` - an
 underscore-prefixed numeric Blackboard primary key plus a trailing `_1`.
-
-## Course identification
-
-The course list page (`/ultra/course`) does **not** expose course IDs via
-a normal `href`. Each course tile is:
-
-```html
-<a class="course-title" id="course-link-_240080_1" href="javascript:void(0);"
-   ng-click="baseCourses.handleCourseLinkClick(membership.course, $event)">
-  <h4 id="course-name-_240080_1">SSPC2002 Techno Harms: ...</h4>
-</a>
-```
-
-The real course ID (`_240080_1`) has to be parsed out of the tile's own
-`id` attribute (`course-link-(.+)`) - the `href` is a no-op Angular click
-handler. There's also a sibling `<span id="course-id-_240080_1">` carrying
-the human-readable module code (`SSPC2002-44138-26-27`), separate from the
-internal ID.
 
 ## Confirmed: content outline structure
 
@@ -146,19 +197,26 @@ pointing at `/ultra/courses/{course_id}/discussion/{content_id}?view=discussions
 What an actual post/reply looks like on that page is **not** confirmed -
 the only topic tested had zero posts.
 
-## Not yet done: real JSON API capture
+## Not yet done: content/announcements/grades/discussions as real API calls
 
-All of the above is HTML-page scraping, not API calls. Ultra's React
+Course discovery is now API-based (above); everything else -
+`blackboard_sync/scraper/content.py`, `announcements.py`, `grades.py`,
+`discussions.py` - still renders and scrapes HTML pages. Ultra's React
 frontend is necessarily calling *something* JSON-shaped, same-origin,
-cookie-authenticated, to render all of this without a full page reload
-when you click around normally - those calls have not been captured yet.
+cookie-authenticated, to render those too; those calls haven't been
+captured yet, but the same technique that found the memberships endpoint
+should work the same way for each of them.
 
 To capture them: run `python -m blackboard_sync discover-api` (optionally
 `--course <id>`) against a real, logged-in session. It attaches a
-Playwright response listener while navigating the same five pages
-documented above, and writes every JSON response whose URL contains
-`/api/` to `debug/api/<section>_NNN.json` (method, URL, request/response
-headers, JSON body). Once that's run and the output reviewed, this
-document and the scraper modules under `blackboard_sync/scraper/` should
-be updated to use the real endpoints instead of (or alongside) the HTML
-routes above.
+Playwright response listener while navigating the outline/announcements/
+grades/engagement pages for one course, and writes every JSON response
+whose URL contains `/api/` to `debug/api/<section>_NNN.json` (method, URL,
+request/response headers, JSON body) - `debug/api/` is cleared at the
+start of each run so files don't mix across runs, and a companion
+`debug/course_list_requests.log` / `log_all_requests()` is available if a
+page's relevant call doesn't match the `/api/` + JSON filter (not
+guaranteed for every page - the course list's own data call turned out to
+live under `/learn/api/v1/...`, found this way after the filtered capture
+alone wasn't enough). Once captured, update the relevant scraper module to
+call the real endpoint directly, the same way courses.py now does.

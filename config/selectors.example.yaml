@@ -19,13 +19,14 @@
 # gitignored so your local tweaks don't need to be committed, though there's
 # no harm in them - nothing secret lives here).
 
-# --- Course list (landing page after login / "My Courses") ---
-# /ultra/course renders Blackboard's older Angular "Base Navigation" course
-# list (not the Ultra React app). Each course tile is
-# <a class="course-title" ... id="course-link-_240080_1"
-#    href="javascript:void(0);">, so the real course ID (e.g. "_240080_1")
-# has to be pulled out of the *id* attribute via course_id_regex - there's
-# no usable href.
+# --- Course list - DEPRECATED, no longer used ---
+# blackboard_sync/scraper/courses.py now calls Blackboard's real internal
+# memberships API directly (GET /learn/api/v1/users/{userId}/memberships)
+# instead of rendering and scraping /ultra/course, which was a persistent
+# source of flakiness (Angular skeleton-loading races, selector drift,
+# course IDs hidden in a non-standard attribute). The five keys below are
+# kept only as a historical record of what the old DOM approach needed -
+# nothing reads them anymore, don't bother tuning them.
 course_list_url_path: "/ultra/course"
 course_tile: "a.course-title"
 course_id_attr: "id"                  # attribute to pull the course ID out of

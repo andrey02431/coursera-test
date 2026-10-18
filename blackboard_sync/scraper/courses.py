@@ -1,4 +1,29 @@
-"""Enumerate the courses the logged-in user is enrolled in."""
+"""Enumerate the courses the logged-in user is enrolled in.
+
+Calls Blackboard's real internal memberships API directly instead of
+rendering/scraping the course list page - captured from a live session via
+`discover-api`:
+
+    GET /learn/api/v1/users/{userId}/memberships
+        ?expand=course.effectiveAvailability,course.permissions,courseRole
+        &includeCount=true&limit=10000
+
+Authenticated by the same session cookies as everything else (no OAuth, no
+extra login step). This replaces every DOM-scraping concern the old
+course-list approach had - Angular skeleton-loading races, selector drift,
+course IDs hidden in an `id` attribute instead of a real href - with one
+fast, complete JSON response. It also surfaces courses the DOM-based course
+list sometimes missed entirely (confirmed on a live account: a Classic/
+Original-view course was present in this API response but never appeared
+in the rendered course list in time).
+
+Each membership's `course.ultraStatus` is "ULTRA" or "CLASSIC". Only Ultra
+courses are supported by the rest of this scraper (content/announcements/
+grades/discussions all assume Ultra's URL shapes); Classic ones are
+reported with ``is_ultra=False`` so callers can skip them with a clear
+reason instead of the old behaviour of just timing out repeatedly trying
+to scrape pages that were never going to match.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +35,7 @@ from typing import Optional
 from playwright.sync_api import Page
 
 from ..config import Config
-from .common import dump, extract_id, goto
+from ..storage import write_json
 
 logger = logging.getLogger(__name__)
 
@@ -20,36 +45,63 @@ class Course:
     course_id: str
     name: str
     url: str
+    is_ultra: bool
+    is_closed: bool
+
+
+def _current_user_id(page: Page, config: Config) -> Optional[str]:
+    response = page.context.request.get(f"{config.base_url}/learn/api/v1/users/me", timeout=config.timeout_ms)
+    if not response.ok:
+        logger.error("Could not resolve current user (HTTP %s) from /learn/api/v1/users/me", response.status)
+        return None
+    return response.json().get("id")
 
 
 def list_courses(page: Page, config: Config, debug_dir: Optional[Path]) -> list[Course]:
-    sel = config.selectors
-    url = config.base_url + sel["course_list_url_path"]
-    goto(page, url, config.timeout_ms, config.request_delay_seconds, settle_selector=sel["course_tile"])
-    dump(page, debug_dir, "course_list")
+    user_id = _current_user_id(page, config)
+    if not user_id:
+        return []
+
+    url = (
+        f"{config.base_url}/learn/api/v1/users/{user_id}/memberships"
+        "?expand=course.effectiveAvailability,course.permissions,courseRole"
+        "&includeCount=true&limit=10000"
+    )
+    response = page.context.request.get(url, timeout=config.timeout_ms)
+    if not response.ok:
+        logger.error("Course memberships request failed: HTTP %s", response.status)
+        return []
+
+    body = response.json()
+    if debug_dir is not None:
+        write_json(debug_dir / "course_list_api_response.json", body)
 
     courses: dict[str, Course] = {}
-    for tile in page.query_selector_all(sel["course_tile"]):
-        attr_value = tile.get_attribute(sel["course_id_attr"]) or ""
-        course_id = extract_id(attr_value, sel["course_id_regex"])
+    for membership in body.get("results", []):
+        c = membership.get("course") or {}
+        course_id = c.get("id")
         if not course_id:
             continue
-        name_el = tile.query_selector(sel["course_name"]) or tile
-        name = (name_el.inner_text() or course_id).strip()
-        # Course tiles use a JS click handler rather than a real href (Blackboard's
-        # Angular-based course list), so we construct the Ultra outline URL
-        # ourselves from the extracted ID rather than reading it off the tile.
-        full_url = config.base_url + sel["content_outline_url_template"].format(course_id=course_id)
-        courses[course_id] = Course(course_id=course_id, name=name, url=full_url)
+
+        is_ultra = c.get("ultraStatus") == "ULTRA"
+        if is_ultra:
+            course_url = c.get("externalAccessUrl") or f"{config.base_url}/ultra/courses/{course_id}/outline"
+        else:
+            home_page = c.get("homePageUrl") or f"/webapps/blackboard/execute/courseMain?course_id={course_id}"
+            course_url = config.base_url + home_page
+
+        courses[course_id] = Course(
+            course_id=course_id,
+            name=c.get("displayName") or c.get("name") or course_id,
+            url=course_url,
+            is_ultra=is_ultra,
+            is_closed=bool(c.get("isClosed")),
+        )
 
     result = list(courses.values())
     if config.course_filter:
         result = [c for c in result if c.course_id in config.course_filter]
 
     if not result:
-        logger.warning(
-            "No courses found. This almost always means config/selectors.yaml "
-            "needs tuning for Southampton's Blackboard theme - re-run with "
-            "--debug-dump and inspect debug/course_list.html."
-        )
+        logger.warning("No courses found in the memberships API response.")
     return result

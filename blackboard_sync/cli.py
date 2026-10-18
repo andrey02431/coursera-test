@@ -60,7 +60,13 @@ def cmd_discover(args: argparse.Namespace) -> int:
         courses = list_courses(page, config, debug_dir)
         print(f"Found {len(courses)} course(s):")
         for course in courses:
-            print(f"  {course.course_id}\t{course.name}")
+            tags = []
+            if not course.is_ultra:
+                tags.append("Classic/Original - not synced")
+            if course.is_closed:
+                tags.append("closed")
+            suffix = f"  [{', '.join(tags)}]" if tags else ""
+            print(f"  {course.course_id}\t{course.name}{suffix}")
         page.close()
     return 0
 
@@ -163,10 +169,20 @@ def cmd_sync(args: argparse.Namespace) -> int:
         totals = {"files": 0, "announcements": 0, "grades": 0, "discussions": 0}
 
         for course in courses:
-            logger.info("Syncing course: %s (%s)", course.name, course.course_id)
             cdir = course_dir(config.output_dir, course.course_id, course.name)
-            write_json(cdir / "course.meta.json", {"course_id": course.course_id, "name": course.name, "url": course.url})
+            write_json(
+                cdir / "course.meta.json",
+                {"course_id": course.course_id, "name": course.name, "url": course.url, "is_ultra": course.is_ultra},
+            )
 
+            if not course.is_ultra:
+                logger.info(
+                    "Skipping %s (%s) - Original/Classic course view isn't supported yet, only Ultra.",
+                    course.name, course.course_id,
+                )
+                continue
+
+            logger.info("Syncing course: %s (%s)", course.name, course.course_id)
             manifest = Manifest(cdir / ".manifest.json")
 
             if config.content.files or config.content.pages:
