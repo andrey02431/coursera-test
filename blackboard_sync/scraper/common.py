@@ -21,16 +21,22 @@ def goto(page: Page, url: str, timeout_ms: int, delay_seconds: float, settle_sel
     """Navigate with a polite delay before the request, so a full sync
     doesn't hammer the server with back-to-back requests.
 
-    Blackboard Ultra is a client-rendered SPA: the network can go idle
-    (page loaded, initial API calls done) well before the actual content
-    has finished rendering - it shows a spinner in between. If
-    ``settle_selector`` is given, we wait for it to actually appear before
-    moving on (falling back to a fixed grace period if it never shows, so a
-    genuinely-empty page or a wrong selector doesn't hang forever). Without
-    a selector, we just wait a fixed grace period.
+    Blackboard Ultra pages load New Relic/Pendo analytics beacons that keep
+    background connections open more or less indefinitely, so
+    ``wait_until="networkidle"`` can fail to resolve at all on this site -
+    confirmed by a live crash where the initial navigation itself timed out
+    waiting for it. The real readiness signal is ``settle_selector``
+    actually appearing, so the main navigation only waits for
+    ``domcontentloaded`` (reached quickly, unaffected by trailing beacon
+    traffic) and a timeout there is treated the same as a missing selector
+    - logged and continued past - rather than left to crash the whole
+    command. Without a selector, we just wait a fixed grace period.
     """
     time.sleep(delay_seconds)
-    page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+    except PlaywrightTimeoutError:
+        logger.warning("Timed out loading %s - continuing anyway so a debug dump can be captured.", url)
     if settle_selector:
         try:
             page.wait_for_selector(settle_selector, timeout=timeout_ms, state="attached")
