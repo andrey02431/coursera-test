@@ -50,6 +50,7 @@ class Config:
     debug_dir: Path
     request_delay_seconds: float
     timeout_ms: int
+    headless: bool
     content: ContentConfig
     course_filter: list[str]
     log_level: str
@@ -73,7 +74,8 @@ class Config:
             log_dir=resolve_path("log_dir"),
             debug_dir=resolve_path("debug_dir"),
             request_delay_seconds=float(raw.get("request_delay_seconds", 1.5)),
-            timeout_ms=int(raw.get("timeout_ms", 30000)),
+            timeout_ms=int(raw.get("timeout_ms", 45000)),
+            headless=bool(raw.get("headless", True)),
             content=ContentConfig(**raw.get("content", {})),
             course_filter=list(raw.get("course_filter", []) or []),
             log_level=raw.get("log_level", "INFO"),

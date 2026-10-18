@@ -161,6 +161,15 @@ python -m blackboard_sync sync --course <course-id-from-discover-output>
 expired, so it's safe to schedule — it will simply no-op/fail loudly
 rather than doing anything destructive.
 
+If every command reports "session expired" immediately after `login` just
+succeeded, your institution's SSO is likely treating a headless browser as
+logged-out even with valid cookies (observed with Southampton's). Set
+`headless: false` in `config/config.yaml` — every command then uses the
+same visible browser window `login` already does, so a window will
+noticeably appear during scheduled runs instead of staying hidden
+in the background. That's the trade-off for getting past that behaviour;
+it doesn't need any interaction once the window appears.
+
 ### Linux/macOS (cron)
 
 ```

@@ -29,6 +29,19 @@ request_delay_seconds: 1.5
 # the logs, raise this further rather than assuming a selector is wrong.
 timeout_ms: 45000
 
+# Whether automated runs (status/discover/discover-api/sync) use a headless
+# browser. `login` always opens a real visible window regardless of this
+# setting, since you need to see it to log in.
+#
+# Some institutions' SSO (observed with Southampton's) treats a headless
+# Chromium session as logged-out even with valid cookies - if a command
+# reports "session expired" right after `login` just succeeded, that's the
+# symptom. Set this to false to run every command through the same visible
+# browser `login` already uses; a window will briefly appear during
+# scheduled/unattended runs instead of staying hidden, which is the
+# trade-off for getting past that SSO behaviour.
+headless: true
+
 # Which content types to sync. All on by default per user preference;
 # turn any of these off if you don't want them.
 content:

@@ -38,7 +38,7 @@ def cmd_login(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     config = Config.load()
-    with Session(config.profile_dir, headless=True) as session:
+    with Session(config.profile_dir, headless=config.headless) as session:
         try:
             require_logged_in(session, config.base_url, config.selectors["login_url_markers"], config.timeout_ms)
         except SessionExpired as exc:
@@ -53,7 +53,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
     _setup_logging(config)
     debug_dir = config.debug_dir if args.debug_dump else None
 
-    with Session(config.profile_dir, headless=True) as session:
+    with Session(config.profile_dir, headless=config.headless) as session:
         require_logged_in(session, config.base_url, config.selectors["login_url_markers"], config.timeout_ms)
         page = session.new_page()
         courses = list_courses(page, config, debug_dir)
@@ -69,7 +69,7 @@ def cmd_discover_api(args: argparse.Namespace) -> int:
     _setup_logging(config)
     out_dir = config.debug_dir / "api"
 
-    with Session(config.profile_dir, headless=True) as session:
+    with Session(config.profile_dir, headless=config.headless) as session:
         try:
             require_logged_in(session, config.base_url, config.selectors["login_url_markers"], config.timeout_ms)
         except SessionExpired as exc:
@@ -128,7 +128,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     logger = logging.getLogger("blackboard_sync.sync")
     debug_dir = config.debug_dir if args.debug_dump else None
 
-    with Session(config.profile_dir, headless=True) as session:
+    with Session(config.profile_dir, headless=config.headless) as session:
         try:
             require_logged_in(session, config.base_url, config.selectors["login_url_markers"], config.timeout_ms)
         except SessionExpired as exc:
