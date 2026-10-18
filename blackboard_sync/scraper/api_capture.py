@@ -71,3 +71,44 @@ def capture_during(page: Page, out_dir: Path, label: str) -> dict:
 
     page.on("response", on_response)
     return counter
+
+
+def log_all_requests(page: Page, out_path: Path) -> list[str]:
+    """Attach a listener that appends one line per request/response pair to
+    ``out_path`` (method, url, status, content-type, timing) - everything,
+    not just things that look like a JSON API. Diagnostic for "did this
+    page even issue the request I'm expecting, and did it succeed, fail, or
+    never come back" - which capture_during's filtered JSON-only view can't
+    answer by itself (not every endpoint is under /api/ with a json
+    content-type, e.g. the older Angular course-list page).
+
+    Returns the same list object that keeps getting appended to, so the
+    caller can inspect it directly without re-reading the file.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+
+    def on_response(response: Response) -> None:
+        try:
+            request = response.request
+            content_type = response.headers.get("content-type", "")
+            line = f"{response.status}\t{request.method}\t{content_type}\t{response.url}"
+        except Exception:
+            line = f"ERROR capturing response for {getattr(response, 'url', '?')}"
+        lines.append(line)
+        try:
+            out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except Exception:
+            logger.exception("Failed to write request log to %s", out_path)
+
+    def on_request_failed(request) -> None:
+        line = f"FAILED\t{request.method}\t-\t{request.url}\t({request.failure})"
+        lines.append(line)
+        try:
+            out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except Exception:
+            logger.exception("Failed to write request log to %s", out_path)
+
+    page.on("response", on_response)
+    page.on("requestfailed", on_request_failed)
+    return lines

@@ -9,7 +9,7 @@ from pathlib import Path
 from .browser import Session, SessionExpired, interactive_login, require_logged_in
 from .config import Config
 from .scraper.announcements import sync_announcements
-from .scraper.api_capture import capture_during
+from .scraper.api_capture import capture_during, log_all_requests
 from .scraper.common import goto
 from .scraper.content import sync_content
 from .scraper.courses import list_courses
@@ -77,10 +77,20 @@ def cmd_discover_api(args: argparse.Namespace) -> int:
             return 1
 
         page = session.new_page()
+        counter = capture_during(page, out_dir, "course_list")
+        request_log_path = config.debug_dir / "course_list_requests.log"
+        log_all_requests(page, request_log_path)
         courses = list_courses(page, config, config.debug_dir)
         page.close()
+        print(f"  course_list: {counter['n']} API call(s) captured")
         if not courses:
-            print(f"No courses found - can't pick one to capture against. See {config.debug_dir / 'course_list.html'} / .png.")
+            print(
+                f"No courses found - can't pick one to capture against. See "
+                f"{config.debug_dir / 'course_list.html'} / .png, whatever "
+                f"landed in {out_dir}, and the full request log at "
+                f"{request_log_path} (every request/response the page made, "
+                f"not just ones that looked like a JSON API)."
+            )
             return 1
 
         course = courses[0]
