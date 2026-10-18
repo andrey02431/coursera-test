@@ -94,32 +94,3 @@ def is_navigable(href: Optional[str]) -> bool:
     return not (lowered.startswith("#") or lowered.startswith("javascript:"))
 
 
-def extract_id(value: str, pattern: str) -> Optional[str]:
-    """Pull an ID out of an attribute value (an href, or an element ``id``
-    like ``course-link-_240080_1``) using a configurable regex, so the
-    convention Blackboard happens to use doesn't need a code change.
-    """
-    match = re.search(pattern, value or "")
-    return match.group(1) if match else None
-
-
-def expand_all_folders(page: Page, toggle_selector: str, max_rounds: int = 25) -> None:
-    """Repeatedly click any collapsed-folder toggles until none remain (or
-    we hit max_rounds, as a safety valve against an infinite loop if a
-    selector is wrong and never disappears).
-    """
-    for _ in range(max_rounds):
-        toggles = page.query_selector_all(toggle_selector)
-        if not toggles:
-            return
-        clicked_any = False
-        for toggle in toggles:
-            try:
-                if toggle.is_visible():
-                    toggle.click(timeout=2000)
-                    clicked_any = True
-                    page.wait_for_timeout(300)
-            except Exception:
-                continue
-        if not clicked_any:
-            return

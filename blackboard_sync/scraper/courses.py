@@ -36,6 +36,7 @@ from playwright.sync_api import Page
 
 from ..config import Config
 from ..storage import write_json
+from .api import build_url, current_user_id, get_json
 
 logger = logging.getLogger(__name__)
 
@@ -49,30 +50,22 @@ class Course:
     is_closed: bool
 
 
-def _current_user_id(page: Page, config: Config) -> Optional[str]:
-    response = page.context.request.get(f"{config.base_url}/learn/api/v1/users/me", timeout=config.timeout_ms)
-    if not response.ok:
-        logger.error("Could not resolve current user (HTTP %s) from /learn/api/v1/users/me", response.status)
-        return None
-    return response.json().get("id")
-
-
 def list_courses(page: Page, config: Config, debug_dir: Optional[Path]) -> list[Course]:
-    user_id = _current_user_id(page, config)
+    user_id = current_user_id(page, config)
     if not user_id:
         return []
 
-    url = (
-        f"{config.base_url}/learn/api/v1/users/{user_id}/memberships"
-        "?expand=course.effectiveAvailability,course.permissions,courseRole"
-        "&includeCount=true&limit=10000"
+    url = build_url(
+        config.base_url,
+        f"/learn/api/v1/users/{user_id}/memberships",
+        expand="course.effectiveAvailability,course.permissions,courseRole",
+        includeCount="true",
+        limit=10000,
     )
-    response = page.context.request.get(url, timeout=config.timeout_ms)
-    if not response.ok:
-        logger.error("Course memberships request failed: HTTP %s", response.status)
+    body = get_json(page, config, url)
+    if body is None:
         return []
 
-    body = response.json()
     if debug_dir is not None:
         write_json(debug_dir / "course_list_api_response.json", body)
 
