@@ -81,6 +81,15 @@ def check_session(session: Session, base_url: str, login_url_markers: Iterable[s
     does (matching scraper/common.py's goto(), which this intentionally
     doesn't import to keep browser.py free of a dependency on the scraper
     package).
+
+    A real but still-valid SSO session can bounce you through an SP-initiated
+    SAML redirect (e.g. to login.microsoftonline.com) and back *silently* -
+    no credential/2FA prompt, just a round trip - if the identity provider's
+    own session is still alive even though Blackboard's own session expired.
+    domcontentloaded fires on that intermediate IdP page before the silent
+    bounce-back finishes, so landing there isn't proof of a dead session by
+    itself: give it one more wait to let that redirect complete before
+    deciding.
     """
     page = session.new_page()
     try:
@@ -88,6 +97,11 @@ def check_session(session: Session, base_url: str, login_url_markers: Iterable[s
         for _ in range(2):
             try:
                 page.goto(base_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                if looks_like_login_page(page.url, login_url_markers):
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=timeout_ms)
+                    except PlaywrightTimeoutError:
+                        pass
                 return (not looks_like_login_page(page.url, login_url_markers), page.url)
             except PlaywrightTimeoutError as exc:
                 last_error = exc
