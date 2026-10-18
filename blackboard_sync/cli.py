@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,6 +69,14 @@ def cmd_discover_api(args: argparse.Namespace) -> int:
     config = Config.load()
     _setup_logging(config)
     out_dir = config.debug_dir / "api"
+    # Start clean: capture_during's per-call counter restarts at 1 each run,
+    # so leftover files from a previous run (which may have captured a
+    # different number/order of calls) would otherwise mix with this run's
+    # output under the same numbered filenames - confirmed happening on a
+    # live run, where a response the request log showed had succeeded
+    # wasn't actually among the files on disk afterwards.
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
 
     with Session(config.profile_dir, headless=config.headless) as session:
         try:
