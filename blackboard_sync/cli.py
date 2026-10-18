@@ -8,6 +8,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from playwright.sync_api import Error as PlaywrightError
+
 from .browser import Session, SessionExpired, interactive_login, require_logged_in
 from .config import Config
 from .scraper.announcements import sync_announcements
@@ -217,20 +219,42 @@ def cmd_sync(args: argparse.Namespace) -> int:
             logger.info("Syncing course: %s (%s)", course.name, course.course_id)
             manifest = Manifest(cdir / ".manifest.json")
 
-            if config.content.files or config.content.pages:
-                totals["files"] += sync_content(page, course, cdir, config, manifest, debug_dir)
-                manifest.save()
+            try:
+                if config.content.files or config.content.pages:
+                    totals["files"] += sync_content(page, course, cdir, config, manifest, debug_dir)
+                    manifest.save()
 
-            if config.content.announcements:
-                totals["announcements"] += sync_announcements(page, course, cdir, config, manifest, debug_dir)
-                manifest.save()
+                if config.content.announcements:
+                    totals["announcements"] += sync_announcements(page, course, cdir, config, manifest, debug_dir)
+                    manifest.save()
 
-            if config.content.grades:
-                totals["grades"] += sync_grades(page, course, cdir, config, debug_dir)
+                if config.content.grades:
+                    totals["grades"] += sync_grades(page, course, cdir, config, debug_dir)
 
-            if config.content.discussions:
-                totals["discussions"] += sync_discussions(page, course, cdir, config, manifest, debug_dir)
-                manifest.save()
+                if config.content.discussions:
+                    totals["discussions"] += sync_discussions(page, course, cdir, config, manifest, debug_dir)
+                    manifest.save()
+            except PlaywrightError:
+                # The browser/driver connection itself is the likely cause
+                # (confirmed on a live run: "Connection closed while reading
+                # from the driver" mid-course, surfaced as a crash during
+                # Session cleanup) - every remaining course would fail the
+                # same way, so stop here instead of churning through them.
+                # Already-synced courses kept their progress via the
+                # manifest; re-running `sync` picks up where this left off.
+                logger.exception(
+                    "Lost the browser connection while syncing %s (%s). Stopping here - "
+                    "already-synced courses are saved, just re-run `sync` to continue.",
+                    course.name, course.course_id,
+                )
+                page.close()
+                return 1
+            except Exception:
+                # Something specific to this one course went wrong - log it
+                # and move on rather than losing progress on every other
+                # course over one bad one.
+                logger.exception("Failed to sync %s (%s) - skipping it, continuing with the rest.", course.name, course.course_id)
+                continue
 
         page.close()
         logger.info(
