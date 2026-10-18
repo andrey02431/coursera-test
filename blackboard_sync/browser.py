@@ -65,9 +65,14 @@ def looks_like_login_page(url: str, login_url_markers: Iterable[str]) -> bool:
     return any(marker.lower() in lowered for marker in login_url_markers)
 
 
-def is_logged_in(session: Session, base_url: str, login_url_markers: Iterable[str], timeout_ms: int) -> bool:
+def check_session(session: Session, base_url: str, login_url_markers: Iterable[str], timeout_ms: int) -> tuple[bool, str]:
     """Navigate to the Blackboard landing page and check whether we got
     bounced to a login/SSO page, which means the saved session is dead.
+    Returns (looks_logged_in, final_url) - the URL is included so a
+    failure says what page was actually reached instead of just "expired",
+    which matters because "expired" is being used as a catch-all for
+    several different failure modes in practice (genuine SSO bounce vs.
+    something else entirely).
 
     Only needs the URL after any redirects have settled, not a fully
     rendered page, so this waits for "domcontentloaded" rather than
@@ -83,7 +88,7 @@ def is_logged_in(session: Session, base_url: str, login_url_markers: Iterable[st
         for _ in range(2):
             try:
                 page.goto(base_url, wait_until="domcontentloaded", timeout=timeout_ms)
-                return not looks_like_login_page(page.url, login_url_markers)
+                return (not looks_like_login_page(page.url, login_url_markers), page.url)
             except PlaywrightTimeoutError as exc:
                 last_error = exc
         assert last_error is not None
@@ -92,11 +97,18 @@ def is_logged_in(session: Session, base_url: str, login_url_markers: Iterable[st
         page.close()
 
 
+def is_logged_in(session: Session, base_url: str, login_url_markers: Iterable[str], timeout_ms: int) -> bool:
+    ok, _ = check_session(session, base_url, login_url_markers, timeout_ms)
+    return ok
+
+
 def require_logged_in(session: Session, base_url: str, login_url_markers: Iterable[str], timeout_ms: int) -> None:
-    if not is_logged_in(session, base_url, login_url_markers, timeout_ms):
+    ok, url = check_session(session, base_url, login_url_markers, timeout_ms)
+    if not ok:
         raise SessionExpired(
-            "Saved Blackboard session has expired or was never established. "
-            "Run `python -m blackboard_sync login` to (re)authenticate."
+            f"Saved Blackboard session has expired or was never established "
+            f"(landed on {url!r} - compare against config/selectors.yaml's "
+            f"login_url_markers). Run `python -m blackboard_sync login` to (re)authenticate."
         )
 
 
