@@ -197,17 +197,52 @@ pointing at `/ultra/courses/{course_id}/discussion/{content_id}?view=discussions
 What an actual post/reply looks like on that page is **not** confirmed -
 the only topic tested had zero posts.
 
+## Confirmed: broad endpoint catalog from an 8-page, 333-call sweep
+
+A broadened `discover-api` run (course list + 8 course-level pages: outline,
+announcements, grades, engagement, calendar, messages, achievements,
+groups) against course `_240135_1` captured 333 calls, deduped by
+`scripts/summarize_api_captures.py` to 66 unique `(method, path)`
+endpoints. Full bodies not yet pulled for most of these - URLs and call
+counts only, from the summarizer's output. The ones most relevant to
+replacing the remaining DOM-scraping scraper modules:
+
+| Purpose | Endpoint |
+|---|---|
+| Course content outline (root) | `GET /learn/api/v1/courses/{courseId}/contents/ROOT` |
+| Course content outline (children, paginated) | `GET /learn/api/v1/courses/{courseId}/contents/ROOT/children?@view=Summary&expand=assignedGroups,selfEnrollmentGroups.group,gradebookCategory&includeInActivityTracking=true&limit=10` |
+| Any folder's children (recurse for nested folders) | `GET /learn/api/v1/courses/{courseId}/contents/{contentId}/children` |
+| Content review/completion indicators | `GET /learn/api/v1/courses/{courseId}/contents/indicators` |
+| **Discussions, maybe** - seen only while loading the engagement page, same shape as the outline's contents API but under a virtual parent id | `GET /learn/api/v1/courses/{courseId}/contents/INTERACTIVE` and `.../INTERACTIVE/children` |
+| Announcements list | `GET /learn/api/v1/courses/{courseId}/announcements?limit=10&offset=0&sort=startDateRestriction(desc)` |
+| Announcement counts | `GET /learn/api/v1/courses/{courseId}/announcements/counts` |
+| Grade column definitions (assignment names, due dates, category) | `GET /learn/api/v1/courses/{courseId}/gradebook/columns?expand=gradebookCategory,associatedRubrics,collectExternalSubmissions` |
+| Actual grade values for the logged-in user | `GET /learn/api/v1/courses/{courseId}/gradebook/grades?userId={userId}&limit=25&offset=0&expand=lastAttempt,attemptsLeft,submissionStatus,hasAttemptOrGradeFeedback,column,...&includeNoGradeItems=true` |
+| Grading schema (percentage/letter mapping) | `GET /learn/api/v1/courses/{courseId}/gradebook/schemas` and `/schemas/{schemaId}` |
+| Due-date exceptions for one enrollment | `GET /learn/api/v1/courses/{courseId}/gradebook/memberships/{membershipId}/exceptions` |
+| Course metadata (instructors, availability) | `GET /learn/api/v1/courses/{courseId}?expand=instructorsMembership,instructorsMembership.courseRole,effectiveAvailability,isChild` |
+| Course roster | `GET /learn/api/v1/courses/{courseId}/memberships?expand=user,courseRole,user.hasEmailAddress` |
+| Calendar events in a date range | `GET /learn/api/v1/courses/{courseId}/calendars/calendarItems?since=<ISO>&until=<ISO>` |
+| Course messages/conversations | `GET /learn/api/v1/courses/{courseId}/conversations?limit=25&offset=0` |
+| Groups | `GET /learn/api/v1/courses/{courseId}/groups?expand=studentCount,memberships,...` and `/groupsets` |
+| Cross-course activity feed (worth checking - could mean one call surfaces what's new across every course instead of per-course polling) | `POST /learn/api/v1/streams/ultra` (body not yet captured) |
+
+Everything above takes `{courseId}` like `_240135_1` and is cookie-authenticated
+the same way as the memberships endpoint - no new auth mechanism needed.
+Full response bodies for announcements/gradebook-columns/gradebook-grades/
+contents-children haven't been pulled yet; that's the next step before
+rewriting `announcements.py`, `grades.py`, and `content.py` against them.
+
 ## Not yet done: content/announcements/grades/discussions as real API calls
 
-Course discovery is now API-based (above); everything else -
-`blackboard_sync/scraper/content.py`, `announcements.py`, `grades.py`,
-`discussions.py` - still renders and scrapes HTML pages. Ultra's React
-frontend is necessarily calling *something* JSON-shaped, same-origin,
-cookie-authenticated, to render those too; those calls haven't been
-captured yet, but the same technique that found the memberships endpoint
-should work the same way for each of them.
+Course discovery is now API-based (above), and the table just above gives
+strong candidates for the rest; `blackboard_sync/scraper/content.py`,
+`announcements.py`, `grades.py`, `discussions.py` still render and scrape
+HTML pages pending their full response bodies being reviewed and each
+module rewritten the way `courses.py` already was.
 
-To capture them: run `python -m blackboard_sync discover-api` (optionally
+To capture more (new pages, or full bodies for the ones above): run
+`python -m blackboard_sync discover-api` (optionally
 `--course <id>`) against a real, logged-in session. It attaches a
 Playwright response listener while navigating the outline/announcements/
 grades/engagement pages for one course, and writes every JSON response
