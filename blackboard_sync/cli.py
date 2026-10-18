@@ -77,10 +77,10 @@ def cmd_discover_api(args: argparse.Namespace) -> int:
             return 1
 
         page = session.new_page()
-        courses = list_courses(page, config, None)
+        courses = list_courses(page, config, config.debug_dir)
         page.close()
         if not courses:
-            print("No courses found - can't pick one to capture against.")
+            print(f"No courses found - can't pick one to capture against. See {config.debug_dir / 'course_list.html'} / .png.")
             return 1
 
         course = courses[0]
