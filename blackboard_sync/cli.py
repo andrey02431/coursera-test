@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -96,9 +97,9 @@ def cmd_discover_api(args: argparse.Namespace) -> int:
         request_log_path = config.debug_dir / "course_list_requests.log"
         log_all_requests(page, request_log_path)
         courses = list_courses(page, config, config.debug_dir)
-        page.close()
         print(f"  course_list: {counter['n']} API call(s) captured")
         if not courses:
+            page.close()
             print(
                 f"No courses found - can't pick one to capture against. See "
                 f"{config.debug_dir / 'course_list.html'} / .png, whatever "
@@ -107,6 +108,25 @@ def cmd_discover_api(args: argparse.Namespace) -> int:
                 f"not just ones that looked like a JSON API)."
             )
             return 1
+
+        # The left-nav icons (Activity, Calendar, Messages, Marks, ...) are
+        # global, not scoped to a course - rather than guess their URLs, pull
+        # them straight off the page we're already on, since course_list.html
+        # loaded them for its own sidebar.
+        global_nav_links = page.eval_on_selector_all(
+            "a[href]",
+            """els => {
+                const seen = new Map();
+                for (const el of els) {
+                    const href = el.href;
+                    if (!href.includes('/ultra/') || href.includes('/ultra/courses/')) continue;
+                    const text = (el.textContent || '').trim();
+                    if (text && !seen.has(href)) seen.set(href, text);
+                }
+                return Array.from(seen, ([href, text]) => ({href, text}));
+            }""",
+        )
+        page.close()
 
         course = courses[0]
         if args.course:
@@ -118,13 +138,25 @@ def cmd_discover_api(args: argparse.Namespace) -> int:
 
         print(f"Capturing real API calls against course: {course.name} ({course.course_id})")
         sel = config.selectors
+        cid = course.course_id
+        # Course-level pages: the four the scraper already uses, plus four
+        # more (calendar/messages/achievements/groups) whose URLs were read
+        # off the course nav bar in an earlier debug dump but aren't wired
+        # into any scraper module yet - diagnostic only, hence hardcoded here
+        # rather than added to selectors.yaml.
         sections = {
-            "course_list": config.base_url + sel["course_list_url_path"],
-            "outline": config.base_url + sel["content_outline_url_template"].format(course_id=course.course_id),
-            "announcements": config.base_url + sel["announcements_url_template"].format(course_id=course.course_id),
-            "grades": config.base_url + sel["grades_url_template"].format(course_id=course.course_id),
-            "engagement": config.base_url + sel["discussions_url_template"].format(course_id=course.course_id),
+            "outline": config.base_url + sel["content_outline_url_template"].format(course_id=cid),
+            "announcements": config.base_url + sel["announcements_url_template"].format(course_id=cid),
+            "grades": config.base_url + sel["grades_url_template"].format(course_id=cid),
+            "engagement": config.base_url + sel["discussions_url_template"].format(course_id=cid),
+            "calendar": f"{config.base_url}/ultra/courses/{cid}/calendar",
+            "messages": f"{config.base_url}/ultra/courses/{cid}/messages",
+            "achievements": f"{config.base_url}/ultra/courses/{cid}/achievements",
+            "groups": f"{config.base_url}/ultra/courses/{cid}/groups/enrollments",
         }
+        for link in global_nav_links:
+            label = "global_" + re.sub(r"[^a-z0-9]+", "_", link["text"].lower()).strip("_")
+            sections[label or f"global_{link['href'][-8:]}"] = link["href"]
 
         total = 0
         for label, url in sections.items():
@@ -133,7 +165,7 @@ def cmd_discover_api(args: argparse.Namespace) -> int:
             goto(section_page, url, config.timeout_ms, config.request_delay_seconds)
             section_page.wait_for_timeout(4000)  # let trailing XHRs finish arriving
             section_page.close()
-            print(f"  {label}: {counter['n']} API call(s) captured")
+            print(f"  {label}: {counter['n']} API call(s) captured  ({url})")
             total += counter["n"]
 
     print(f"\nDone. {total} API call(s) saved under {out_dir}")
