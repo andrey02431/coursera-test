@@ -9,6 +9,8 @@ from pathlib import Path
 from .browser import Session, SessionExpired, interactive_login, require_logged_in
 from .config import Config
 from .scraper.announcements import sync_announcements
+from .scraper.api_capture import capture_during
+from .scraper.common import goto
 from .scraper.content import sync_content
 from .scraper.courses import list_courses
 from .scraper.discussions import sync_discussions
@@ -59,6 +61,62 @@ def cmd_discover(args: argparse.Namespace) -> int:
         for course in courses:
             print(f"  {course.course_id}\t{course.name}")
         page.close()
+    return 0
+
+
+def cmd_discover_api(args: argparse.Namespace) -> int:
+    config = Config.load()
+    _setup_logging(config)
+    out_dir = config.debug_dir / "api"
+
+    with Session(config.profile_dir, headless=True) as session:
+        try:
+            require_logged_in(session, config.base_url, config.selectors["login_url_markers"], config.timeout_ms)
+        except SessionExpired as exc:
+            print(exc)
+            return 1
+
+        page = session.new_page()
+        courses = list_courses(page, config, None)
+        page.close()
+        if not courses:
+            print("No courses found - can't pick one to capture against.")
+            return 1
+
+        course = courses[0]
+        if args.course:
+            match = next((c for c in courses if c.course_id == args.course), None)
+            if match is None:
+                print(f"Course {args.course!r} not found. Known IDs: {[c.course_id for c in courses]}")
+                return 1
+            course = match
+
+        print(f"Capturing real API calls against course: {course.name} ({course.course_id})")
+        sel = config.selectors
+        sections = {
+            "course_list": config.base_url + sel["course_list_url_path"],
+            "outline": config.base_url + sel["content_outline_url_template"].format(course_id=course.course_id),
+            "announcements": config.base_url + sel["announcements_url_template"].format(course_id=course.course_id),
+            "grades": config.base_url + sel["grades_url_template"].format(course_id=course.course_id),
+            "engagement": config.base_url + sel["discussions_url_template"].format(course_id=course.course_id),
+        }
+
+        total = 0
+        for label, url in sections.items():
+            section_page = session.new_page()
+            counter = capture_during(section_page, out_dir, label)
+            goto(section_page, url, config.timeout_ms, config.request_delay_seconds)
+            section_page.wait_for_timeout(4000)  # let trailing XHRs finish arriving
+            section_page.close()
+            print(f"  {label}: {counter['n']} API call(s) captured")
+            total += counter["n"]
+
+    print(f"\nDone. {total} API call(s) saved under {out_dir}")
+    print(
+        "These files may contain grades/personal data like any other debug "
+        "dump - keep them local, don't publish them. Share the relevant "
+        "ones here so the scraper can be rebuilt against the real API shapes."
+    )
     return 0
 
 
@@ -128,6 +186,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_discover = sub.add_parser("discover", help="List courses/content without downloading anything.")
     p_discover.add_argument("--debug-dump", action="store_true", help="Save HTML/screenshots of every page visited.")
     p_discover.set_defaults(func=cmd_discover)
+
+    p_api = sub.add_parser(
+        "discover-api",
+        help="Capture the real JSON API calls Blackboard's own frontend makes, for building an API-based scraper.",
+    )
+    p_api.add_argument("--course", help="Capture against this course ID instead of the first one found.")
+    p_api.set_defaults(func=cmd_discover_api)
 
     p_sync = sub.add_parser("sync", help="Download new/changed content for all (or one) course.")
     p_sync.add_argument("--course", help="Only sync this course ID (as shown by `discover`).")

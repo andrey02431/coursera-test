@@ -108,6 +108,24 @@ Blackboard dashboard, then press Enter in the terminal.
 python -m blackboard_sync status
 ```
 
+### Capture Blackboard's real internal API calls (for the maintainers)
+
+There's no realistic path to Blackboard's officially documented REST API
+for a student account - it requires an institution admin to register an
+OAuth integration. Instead, `discover-api` records the actual JSON API
+calls Blackboard Ultra's own frontend makes while loading a page, using
+your already-authenticated session:
+
+```bash
+python -m blackboard_sync discover-api
+```
+
+This writes one JSON file per captured call to `debug/api/`, each with the
+method, URL, headers, and response body. Those files are what the
+API-based scraper gets built against, instead of guessing endpoint shapes
+blind. They can contain grades/personal data like any other debug dump -
+keep them local.
+
 ### See what courses/content would be found, without downloading
 
 ```bash
