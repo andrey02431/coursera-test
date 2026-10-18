@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Iterable
 
 from playwright.sync_api import BrowserContext, Playwright, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +68,26 @@ def looks_like_login_page(url: str, login_url_markers: Iterable[str]) -> bool:
 def is_logged_in(session: Session, base_url: str, login_url_markers: Iterable[str], timeout_ms: int) -> bool:
     """Navigate to the Blackboard landing page and check whether we got
     bounced to a login/SSO page, which means the saved session is dead.
+
+    Only needs the URL after any redirects have settled, not a fully
+    rendered page, so this waits for "domcontentloaded" rather than
+    "networkidle" - much less likely to time out than the full-page loads
+    sync does elsewhere, and retried once for the cases where it still
+    does (matching scraper/common.py's goto(), which this intentionally
+    doesn't import to keep browser.py free of a dependency on the scraper
+    package).
     """
     page = session.new_page()
     try:
-        page.goto(base_url, wait_until="networkidle", timeout=timeout_ms)
-        return not looks_like_login_page(page.url, login_url_markers)
+        last_error: PlaywrightTimeoutError | None = None
+        for _ in range(2):
+            try:
+                page.goto(base_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                return not looks_like_login_page(page.url, login_url_markers)
+            except PlaywrightTimeoutError as exc:
+                last_error = exc
+        assert last_error is not None
+        raise last_error
     finally:
         page.close()
 
