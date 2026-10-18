@@ -91,13 +91,19 @@ Each entry in a `/contents/.../children` response:
   captured tree response - only inferred from the Ultra UI's document
   viewer page, not this API. Next capture should drill into a folder with
   an actual file reading to confirm.
-- **`body.webLocation`** is present on every item type seen so far and is
-  type-agnostic (same shape whether folder, forum link, or tool) - this is
-  likely the right generic "open this item" URL rather than
-  type-specific paths like `/ultra/courses/{id}/document/{contentId}`
-  (which was reverse-engineered from the DOM and is known to work for at
-  least document-type items, but whether it generalizes to every type is
-  unconfirmed).
+- **`body.webLocation`** (`https://.../courses/1/{courseDisplayId}/content/{id}/embedded/`)
+  is present and type-agnostic on every item seen, but **confirmed NOT
+  directly navigable** as a top-level page: visiting it lands on a plain
+  "The specified resource was not found or you do not have permission to
+  access it" page (checked live). It's presumably meant to be loaded
+  inside an iframe with some parent-frame context, not opened standalone.
+  Use the type-specific URL instead, keyed off `contentHandler`:
+  `/ultra/courses/{id}/document/{contentId}?view=content&state=view` for
+  ordinary content (reverse-engineered from the DOM, confirmed working for
+  at least document-type items), `/ultra/courses/{id}/discussion/{contentId}?view=discussions`
+  for `resource/x-bb-forumlink`, and nothing at all (skip) for
+  `resource/x-bb-bltiplacement-*` (an LTI tool launch, e.g. a Teams
+  meeting link - there's no document to fetch).
 - **Pagination**: every list endpoint (announcements, grades, content
   children) shares one shape - `{"results": [...], "paging": {"limit",
   "count", "offset", "nextPage", "previousPage"}, "permissions": {...}}`.

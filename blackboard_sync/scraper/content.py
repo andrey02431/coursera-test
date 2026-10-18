@@ -14,10 +14,19 @@ File downloads still go through the one proven mechanism found so far (no
 API equivalent located yet): each leaf item's own Ultra detail page embeds
 the real file URL in a hidden, non-clickable
 <a data-ally-file-preview-url="https://.../bbcswebdav/...">, fetched
-directly via context.request rather than simulating a click. The item's
-own body.webLocation (present on every content-tree item type seen so far)
-is used as the page to visit, falling back to the old Ultra document-view
-URL pattern only if that field is somehow missing.
+directly via context.request rather than simulating a click.
+
+The item's own body.webLocation looked promising (present and
+type-agnostic on every content-tree item seen) but turned out NOT to be
+safely navigable as a direct top-level page - confirmed on a live run,
+where visiting it landed on a plain "The specified resource was not found
+or you do not have permission to access it" page (plausibly meant to be
+loaded inside an iframe, not top-level). The URL is instead built per
+contentHandler, same as the original DOM-based version used: the
+Ultra document-view pattern for ordinary content, the discussion-view
+pattern for forum links, and LTI tool-launch items (contentHandler
+starting with "resource/x-bb-bltiplacement", e.g. a Teams meeting link)
+are skipped outright - there's no document to fetch for those.
 """
 
 from __future__ import annotations
@@ -43,13 +52,21 @@ class ContentItem:
     item_id: str
     title: str
     path_parts: list[str]
-    url: Optional[str]
+    url: Optional[str]  # None for content types with nothing fetchable (e.g. an LTI tool launch)
 
 
 def _is_folder(item: dict) -> bool:
     handler = item.get("contentHandler", "")
     detail = (item.get("contentDetail") or {}).get(handler) or {}
     return bool(detail.get("isFolder"))
+
+
+def _item_url(base_url: str, course_id: str, content_id: str, content_handler: str) -> Optional[str]:
+    if content_handler.startswith("resource/x-bb-bltiplacement"):
+        return None  # external tool launch (e.g. a Teams meeting link) - nothing to fetch
+    if content_handler == "resource/x-bb-forumlink":
+        return f"{base_url}/ultra/courses/{course_id}/discussion/{content_id}?view=discussions"
+    return f"{base_url}/ultra/courses/{course_id}/document/{content_id}?view=content&state=view"
 
 
 def discover_items(page: Page, config: Config, course_id: str, root: str = "ROOT") -> list[ContentItem]:
@@ -77,10 +94,7 @@ def discover_items(page: Page, config: Config, course_id: str, root: str = "ROOT
                 walk(content_id, path_parts + [title])
                 continue
 
-            web_location = (child.get("body") or {}).get("webLocation")
-            item_url = web_location or (
-                f"{config.base_url}/ultra/courses/{course_id}/document/{content_id}?view=content&state=view"
-            )
+            item_url = _item_url(config.base_url, course_id, content_id, child.get("contentHandler", ""))
             items.append(ContentItem(item_id=content_id, title=title, path_parts=path_parts, url=item_url))
 
     walk(root, [])
@@ -146,6 +160,13 @@ def sync_content(page: Page, course: Course, course_dir: Path, config: Config, m
 
         body_el = page.query_selector(body_selector)
         body_html = body_el.inner_html() if body_el else ""
+        if "specified resource was not found" in body_html.lower():
+            logger.warning(
+                "Item %r (%s) in course %s landed on a Blackboard error page - "
+                "skipping rather than saving it as content.",
+                item.title, item.item_id, course.course_id,
+            )
+            continue
         dest = unique_path(target_dir, safe_name(item.title) + ".html")
         write_text(dest, body_html or item.title)
         write_json(
